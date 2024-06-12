@@ -7,11 +7,12 @@ from django.forms import ValidationError
 
 
 class AppUserManager(BaseUserManager):
-	def create_user(self, email, password=None):
+	def create_user(self, email, password=None, username=None):
 		if not email:
 			raise ValueError('An email is required.')
 		if not password:
 			raise ValueError('A password is required.')
+
 		email = self.normalize_email(email)
 		user = self.model(email=email)
 		user.set_password(password)
@@ -22,12 +23,9 @@ class AppUserManager(BaseUserManager):
 			raise ValueError('An email is required.')
 		if not password:
 			raise ValueError('A password is required.')
-		if not username:
-			raise ValueError('A username is required.')
 		user = self.create_user(email, password)
 		user.is_staff = True
 		user.is_superuser = True
-		user.username = username
 		user.save()
 		return user
 
@@ -35,7 +33,7 @@ class AppUserManager(BaseUserManager):
 class AppUser(AbstractBaseUser, PermissionsMixin):
 	user_id = models.AutoField(primary_key=True)
 	email = models.EmailField(max_length=50, unique=True)
-	username = models.CharField(max_length=50)
+	username = models.CharField(max_length=50, unique=True, blank=False)
 	is_active = models.BooleanField(default=True)
 	is_staff = models.BooleanField(default=False)
 	USERNAME_FIELD = 'email'
@@ -190,6 +188,14 @@ class Cart(models.Model):
         through='CartItem', 
         verbose_name=('Продукты')
     )
+    
+    def add_product(self, product_id, quantity=1):
+        product_data = {
+            'product_id': product_id,
+            'quantity': quantity
+        }
+        self.products.append(product_data)
+        self.save()
     
     class Meta:
         verbose_name = ('Корзина')

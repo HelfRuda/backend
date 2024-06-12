@@ -13,15 +13,22 @@ from .serializers import CategorySerializer, ProductSerializer, OrderSerializer,
 
 
 class UserRegister(APIView):
-	permission_classes = (permissions.AllowAny,)
-	def post(self, request):
-		clean_data = custom_validation(request.data)
-		serializer = UserRegisterSerializer(data=clean_data)
-		if serializer.is_valid(raise_exception=True):
-			user = serializer.create(clean_data)
-			if user:
-				return Response(serializer.data, status=status.HTTP_201_CREATED)
-		return Response(status=status.HTTP_400_BAD_REQUEST)
+    permission_classes = (permissions.AllowAny,)
+    
+    def post(self, request):
+        clean_data = custom_validation(request.data)
+        serializer = UserRegisterSerializer(data=clean_data)
+        
+        if serializer.is_valid(raise_exception=True):
+            user = serializer.save()  # Сохраняем пользователя
+            # Создаем пустую корзину для пользователя
+            Cart.objects.create(user=user)
+            
+            response = Response(serializer.data, status=status.HTTP_201_CREATED)
+            response["Access-Control-Allow-Origin"] = "*"  # Разрешить доступ с любого источника
+            return response
+        
+        return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserLogin(APIView):
@@ -126,23 +133,24 @@ class CartView(APIView):
     authentication_classes = (SessionAuthentication,)
 
     def get(self, request):
-        carts = Cart.objects.all()
-        serializer = CartSerializer(carts, many=True)
+        cart = Cart.objects.get(user=request.user)  # Получаем корзину текущего пользователя
+        serializer = CartSerializer(cart)
         return Response(serializer.data)
 
     def post(self, request):
+        cart = Cart.objects.get(user=request.user)  # Получаем корзину текущего пользователя
         serializer = CartSerializer(data=request.data)
+        
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(cart=cart)  # Сохраняем продукт в корзину
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def delete(self, request, item_id):
         try:
             cart_item = CartItem.objects.get(id=item_id)
+            cart_item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
         except CartItem.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
-
-        cart_item.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    
