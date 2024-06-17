@@ -3,26 +3,18 @@ from django.contrib.auth import get_user_model
 UserModel = get_user_model()
 
 def custom_validation(data):
-    if 'email' not in data:
-        raise ValidationError('Отсутствует ключ "email" в данных запроса')
-    if 'username' not in data:
-        raise ValidationError('Отсутствует ключ "username" в данных запроса')
-    if 'password' not in data:
-        raise ValidationError('Отсутствует ключ "password" в данных запроса')
-
     email = data['email'].strip()
     username = data['username'].strip()
     password = data['password'].strip()
-
+    ##
     if not email or UserModel.objects.filter(email=email).exists():
-        raise ValidationError('Пожалуйста, укажите другой адрес электронной почты')
-
+        raise ValidationError('другой имейл братишка')
+    ##
     if not password or len(password) < 8:
-        raise ValidationError('Пароль должен содержать минимум 8 символов')
-
+        raise ValidationError('минимум 8 символов')
+    ##
     if not username:
-        raise ValidationError('Пожалуйста, выберите имя пользователя')
-
+        raise ValidationError('Выбери ник')
     return data
 
 

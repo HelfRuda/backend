@@ -4,36 +4,41 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.forms import ValidationError
-
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.conf import settings
 
 class AppUserManager(BaseUserManager):
-	def create_user(self, email, password=None, username=None):
-		if not email:
-			raise ValueError('An email is required.')
-		if not password:
-			raise ValueError('A password is required.')
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('An email is required.')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)  # Include extra fields
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
 
-		email = self.normalize_email(email)
-		user = self.model(email=email)
-		user.set_password(password)
-		user.save()
-		return user
-	def create_superuser(self, email, password=None, username=None):
-		if not email:
-			raise ValueError('An email is required.')
-		if not password:
-			raise ValueError('A password is required.')
-		user = self.create_user(email, password)
-		user.is_staff = True
-		user.is_superuser = True
-		user.save()
-		return user
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+
+        if not email:
+            raise ValueError('An email is required.')
+        if not password:
+            raise ValueError('A password is required.')
+
+        # Ensure that the superuser has both is_staff and is_superuser set to True
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True.')
+
+        return self.create_user(email, password, **extra_fields)
 
 
 class AppUser(AbstractBaseUser, PermissionsMixin):
-	user_id = models.AutoField(primary_key=True)
 	email = models.EmailField(max_length=50, unique=True)
-	username = models.CharField(max_length=50, unique=True, blank=False)
+	username = models.CharField(max_length=50)
 	is_active = models.BooleanField(default=True)
 	is_staff = models.BooleanField(default=False)
 	USERNAME_FIELD = 'email'
@@ -46,6 +51,11 @@ class AppUser(AbstractBaseUser, PermissionsMixin):
 
 	def __str__(self):
 		return self.username
+
+@receiver(post_save, sender=AppUser)
+def create_user_cart(sender, instance, created, **kwargs):
+    if created:
+        Cart.objects.create(user=instance)
 
 class Category(models.Model):
     name = models.CharField(max_length=100)
@@ -163,61 +173,33 @@ class Order(models.Model):
 
     def clean(self):
         super().clean()
-        if self.quantity > self.product.stock:
+        if self.quantity > self.product.quantity:
             raise ValidationError("Недостаточное количество товара на складе")
-    
-    def total_amount(self):
-        total = 0
-        for item in self.items.all():
-            total += item.product.price_with_discount * item.quantity
-        return total
     
     class Meta:
         verbose_name = ('Заказ')
         verbose_name_plural = ('Заказы')
         
 class Cart(models.Model):
-    user = models.ForeignKey(
-        AppUser, 
-        on_delete=models.CASCADE, 
-        verbose_name=('Пользователь')
-    )
-        
-    products = models.ManyToManyField(
-        Product, 
-        through='CartItem', 
-        verbose_name=('Продукты')
-    )
-    
-    def add_product(self, product_id, quantity=1):
-        product_data = {
-            'product_id': product_id,
-            'quantity': quantity
-        }
-        self.products.append(product_data)
-        self.save()
-    
+    user = models.OneToOneField(AppUser, on_delete=models.CASCADE, related_name='cart')
+
     class Meta:
-        verbose_name = ('Корзина')
-        verbose_name_plural = ('Корзины')
+        verbose_name = 'Корзина'
+        verbose_name_plural = 'Корзины'
+
+    def __str__(self):
+        return f"Корзина пользователя {self.user.username}"
 
 class CartItem(models.Model):
-    product = models.ForeignKey(
-        Product, 
-        on_delete=models.CASCADE, 
-        verbose_name=('Продукт')
-    )
-        
-    cart = models.ForeignKey(
-        Cart, 
-        on_delete=models.CASCADE, 
-        verbose_name=('Корзина')
-    )
-        
-    quantity = models.PositiveIntegerField(
-        verbose_name=('Количество')
-    )
-    
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey('Product', on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField()
+
     class Meta:
-        verbose_name = ('Элемент корзины')
-        verbose_name_plural = ('Элементы корзины')
+        verbose_name = 'Элемент корзины'
+        verbose_name_plural = 'Элементы корзины'
+
+    def __str__(self):
+        return f"{self.quantity} x {self.product.name}"
+        
+
