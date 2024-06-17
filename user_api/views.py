@@ -1,6 +1,5 @@
-from django.contrib.auth import get_user_model, login, logout
-from django.http import Http404
-from rest_framework.authentication import SessionAuthentication
+from django.contrib.auth import login, logout
+from rest_framework.authentication import SessionAuthentication, BasicAuthentication
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .serializers import UserRegisterSerializer, UserLoginSerializer, UserSerializer
@@ -10,57 +9,73 @@ from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
 from rest_framework import status
 from .models import Category, Product, Order, Cart, CartItem
 from .serializers import CategorySerializer, ProductSerializer, OrderSerializer, CartSerializer, CartItemSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 class UserRegister(APIView):
     permission_classes = (permissions.AllowAny,)
-    
+
     def post(self, request):
         clean_data = custom_validation(request.data)
         serializer = UserRegisterSerializer(data=clean_data)
-        
         if serializer.is_valid(raise_exception=True):
-            user = serializer.save()  # Сохраняем пользователя
-            # Создаем пустую корзину для пользователя
-            Cart.objects.create(user=user)
-            
-            response = Response(serializer.data, status=status.HTTP_201_CREATED)
-            response["Access-Control-Allow-Origin"] = "*"  # Разрешить доступ с любого источника
-            return response
-        
+            user = serializer.save()  # метод save сериализатора
+            if user:
+                # Создаем токены JWT для пользователя
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                    'user': serializer.data
+                }, status=status.HTTP_201_CREATED)
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
+class UserLogin(TokenObtainPairView):
+    permission_classes = (permissions.AllowAny,)
 
-class UserLogin(APIView):
-	permission_classes = (permissions.AllowAny,)
-	authentication_classes = (SessionAuthentication,)
-	##
-	def post(self, request):
-		data = request.data
-		assert validate_email(data)
-		assert validate_password(data)
-		serializer = UserLoginSerializer(data=data)
-		if serializer.is_valid(raise_exception=True):
-			user = serializer.check_user(data)
-			login(request, user)
-			return Response(serializer.data, status=status.HTTP_200_OK)
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
 
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0])
+
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+    @classmethod
+    def get_serializer_class(cls):
+        return TokenObtainPairSerializer
 
 class UserLogout(APIView):
-	permission_classes = (permissions.AllowAny,)
-	authentication_classes = ()
-	def post(self, request):
-		logout(request)
-		return Response(status=status.HTTP_200_OK)
+    permission_classes = (permissions.AllowAny,)
+    authentication_classes = (JWTAuthentication,)
+    
+    def post(self, request):
+        logout(request)
+        return Response(status=status.HTTP_200_OK)
 
 
 class UserView(APIView):
-	permission_classes = (permissions.IsAuthenticated,)
-	authentication_classes = (SessionAuthentication,)
-	##
-	def get(self, request):
-		serializer = UserSerializer(request.user)
-		return Response({'user': serializer.data}, status=status.HTTP_200_OK)
+    permission_classes = (permissions.IsAuthenticated,)
+    authentication_classes = (JWTAuthentication,)
+
+    def get(self, request):
+        # Получение данных профиля пользователя
+        serializer = UserSerializer(request.user)
+        return Response({'user': serializer.data}, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        # Обновление данных профиля пользователя
+        serializer = UserSerializer(request.user, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'user': serializer.data}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class ProductListCreateAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -129,28 +144,30 @@ class CategoryList(ListAPIView):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)  # Запрещаем метод DELETE
     
 class CartView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
-    authentication_classes = (SessionAuthentication,)
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication, SessionAuthentication, BasicAuthentication]
 
     def get(self, request):
-        cart = Cart.objects.get(user=request.user)  # Получаем корзину текущего пользователя
+        # Получаем корзину текущего пользователя
+        cart, created = Cart.objects.get_or_create(user=request.user)
         serializer = CartSerializer(cart)
         return Response(serializer.data)
 
     def post(self, request):
-        cart = Cart.objects.get(user=request.user)  # Получаем корзину текущего пользователя
-        serializer = CartSerializer(data=request.data)
-        
+        # Добавляем новый элемент в корзину пользователя
+        cart, created = Cart.objects.get_or_create(user=request.user)
+        serializer = CartItemSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(cart=cart)  # Сохраняем продукт в корзину
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
+            cart_item = serializer.save(cart=cart)
+            return Response(CartItemSerializer(cart_item).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def delete(self, request, item_id):
+        # Удаляем элемент из корзины пользователя
         try:
-            cart_item = CartItem.objects.get(id=item_id)
+            cart_item = CartItem.objects.get(id=item_id, cart__user=request.user)
             cart_item.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
         except CartItem.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
+    
