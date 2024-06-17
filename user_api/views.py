@@ -14,6 +14,9 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from rest_framework_simplejwt.tokens import RefreshToken
+from .filters import ProductFilter
+from django_filters.rest_framework import DjangoFilterBackend
+
 
 
 class UserRegister(APIView):
@@ -69,38 +72,56 @@ class UserView(APIView):
         serializer = UserSerializer(request.user)
         return Response({'user': serializer.data}, status=status.HTTP_200_OK)
 
-    def put(self, request):
-        # Обновление данных профиля пользователя
-        serializer = UserSerializer(request.user, data=request.data)
+    def patch(self, request):
+        # Частичное обновление данных профиля пользователя
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response({'user': serializer.data}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class ProductListCreateAPIView(APIView):
-    permission_classes = (permissions.IsAuthenticated,)
-    authentication_classes = (JWTAuthentication,)
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ProductFilter
+    
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            self.authentication_classes = [JWTAuthentication,]
+            self.permission_classes = [permissions.IsAuthenticated,]
+        else:
+            self.authentication_classes = []
+            self.permission_classes = [permissions.AllowAny,]
+        return [permission() for permission in self.permission_classes]
 
-    def get(self, request):
-        products = Product.objects.all()
-        serializer = ProductSerializer(products, many=True)
+    def get(self, request, *args, **kwargs):
+        filtered_queryset = self.filterset_class(self.request.GET, queryset=self.queryset).qs
+        serializer = self.serializer_class(filtered_queryset, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        if not request.user.is_authenticated:
-            return Response({"message": "Требуется аутентификация"}, status=status.HTTP_401_UNAUTHORIZED)
-
+        # Доступ только аутентифицированным пользователям
         serializer = ProductSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class ProductDetailAPIView(RetrieveUpdateAPIView):
-    permission_classes = (permissions.IsAuthenticated,)
-    authentication_classes = (JWTAuthentication,)
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+
+    def get_permissions(self):
+        if self.request.method == 'PATCH':
+            self.authentication_classes = [JWTAuthentication,]
+            self.permission_classes = [permissions.IsAuthenticated,]
+        else:
+            self.authentication_classes = []
+            self.permission_classes = [permissions.AllowAny,]
+        return [permission() for permission in self.permission_classes]
 
     def get_object(self):
         pk = self.kwargs.get('pk')
