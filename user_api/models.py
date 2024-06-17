@@ -115,7 +115,7 @@ class Product(models.Model):
         verbose_name=('Срок хранения'),
 	)
     photos = models.ImageField(
-        upload_to='media/product_photos/', 
+        upload_to='product_photos/', 
         blank=True, null=True,
         verbose_name=('Блок фотографий'),
     )
