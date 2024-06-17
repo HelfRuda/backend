@@ -1,10 +1,10 @@
-from django.contrib.auth import login, logout
+from django.contrib.auth import logout
 from rest_framework.authentication import SessionAuthentication, BasicAuthentication
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .serializers import UserRegisterSerializer, UserLoginSerializer, UserSerializer
 from rest_framework import permissions, status
-from .validations import custom_validation, validate_email, validate_password
+from .validations import custom_validation
 from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
 from rest_framework import status
 from .models import Category, Product, Order, Cart, CartItem
@@ -78,7 +78,8 @@ class UserView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class ProductListCreateAPIView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = (permissions.IsAuthenticated,)
+    authentication_classes = (JWTAuthentication,)
 
     def get(self, request):
         products = Product.objects.all()
@@ -96,7 +97,8 @@ class ProductListCreateAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class ProductDetailAPIView(RetrieveUpdateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = (permissions.IsAuthenticated,)
+    authentication_classes = (JWTAuthentication,)
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
 
@@ -106,14 +108,15 @@ class ProductDetailAPIView(RetrieveUpdateAPIView):
 
     def patch(self, request, *args, **kwargs):
         product = self.get_object()
-        serializer = ProductSerializer(product, data=request.data, partial=True)  # Разрешаем частичное обновление
+        serializer = ProductSerializer(product, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class OrderListCreateAPIView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = (permissions.IsAuthenticated,)
+    authentication_classes = (JWTAuthentication,)
 
     def get(self, request):
         orders = Order.objects.all()
